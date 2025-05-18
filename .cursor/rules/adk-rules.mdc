@@ -1,0 +1,168 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: Diretrizes e melhores práticas para o desenvolvimento de agentes inteligentes com o Google Agent Development Kit (ADK), visando padronização, eficiência e robustez.
+globs: ["**/*.py"] # Aplicável a arquivos Python, ajuste se necessário.
+alwaysApply: true
+---
+
+# Dominando o Desenvolvimento de Agentes com Google ADK
+
+Este documento estabelece os padrões essenciais para o desenvolvimento de agentes com o Google Agent Development Kit (ADK). Siga estas diretrizes para construir agentes robustos, de fácil manutenção e alinhados com as melhores práticas.
+
+## I. Fundamentos do Desenvolvimento ADK
+
+### A. Planejamento Estratégico e Objetivos (SMART)
+* **Defina Objetivos Claros (SMART)**: Antes de codificar, estabeleça metas Específicas, Mensuráveis, Alcançáveis, Relevantes e Temporais.
+    * A clareza dos objetivos influencia diretamente as decisões arquitetônicas no ADK (ex: single LlmAgent vs. multiagente; LlmAgent vs. WorkflowAgent).
+* **Valide KPIs**: Defina como o sucesso será medido.
+* **Entradas e Saídas**: Determine os dados que o agente consumirá e produzirá; isso ditará as ferramentas necessárias.
+* *Instrução para a IA*: "Ao iniciar um novo agente ADK, ajude-me a detalhar os objetivos SMART e a considerar como eles impactam a escolha entre arquiteturas single/multi-agente e os tipos de agente (LlmAgent, WorkflowAgent)."
+
+### B. Princípios Arquitetônicos Centrais
+* **Modularidade**:
+    * Projete agentes e componentes (ferramentas, subagentes) de forma modular. No ADK, isso significa:
+        * Dividir tarefas complexas em funções menores e gerenciáveis (`tools`).
+        * Delegar subtarefas a instâncias `Agent` especializadas (`sub_agents`).
+        * Utilizar `SequentialAgent`, `ParallelAgent` ou `LoopAgent` para orquestrar subagentes.
+    * *Instrução para a IA*: "Sugira designs modulares para agentes ADK, explicitando o uso de ferramentas granulares e a delegação a subagentes orquestrados por WorkflowAgents, quando apropriado."
+* **Simplicidade (KISS)**:
+    * Comece com a solução mais simples no ADK e adicione complexidade apenas se necessário.
+    * Evite superengenharia *dentro* da estrutura do ADK. Não crie um sistema multiagente complexo se um LlmAgent com boas ferramentas for suficiente.
+    * O ADK simplifica arquiteturas complexas; não o use para criar complexidade desnecessária.
+* **Transparência**:
+    * Priorize a transparência nos processos de tomada de decisão do agente.
+    * No ADK, utilize logging extensivo, inspeção de eventos e callbacks para observabilidade.
+    * *Instrução para a IA*: "Ao gerar código para agentes ADK, inclua logging detalhado e sugira o uso de callbacks para aumentar a transparência e observabilidade do fluxo de execução."
+
+## II. Projetando e Estruturando Agentes ADK
+
+### A. Configuração do Núcleo do Agente (`Agent` Class)
+* **Parâmetros Essenciais da Classe `Agent`**:
+    * `name`: Identificador único, descritivo e versionado (ex: "agente_orcamento_financeiro_v2.1").
+    * `model`: Especifique o LLM (ex: "gemini-1.5-pro-001"). **Fixe a versão para produção.** Considere `LiteLlm` para suporte a múltiplos provedores.
+    * `description`: **Crucial para delegação em sistemas multiagente.** Deve ser um resumo conciso e preciso do propósito e capacidades do agente.
+    * `instruction`: **Orientação detalhada para o LLM.** Deve cobrir comportamento, persona, objetivos específicos, restrições e como/quando usar as `tools` fornecidas. Seja explícito sobre o formato de saída esperado, se houver.
+    * `tools`: Lista de objetos de função Python que o agente pode invocar.
+    * `sub_agents`: Lista de outras instâncias `Agent` para delegação de tarefas.
+    * `output_key`: Chave string para salvar a resposta final do agente no `session.state`, útil para encadear agentes.
+    * `callbacks` (ex: `before_model_callback`, `before_tool_callback`, `after_tool_callback`, `on_llm_error`, `on_tool_error`): **Essenciais para guardrails, segurança, logging e modificação de fluxo.**
+* **Tríade Crítica: `description`, `instruction` e `tools` (com suas docstrings)**:
+    * Devem ser meticulosamente elaborados e alinhados.
+    * `description` é para outros agentes (delegação).
+    * `instruction` é para o LLM do próprio agente (tarefa/persona).
+    * Docstrings de `tools` são para o LLM do agente (como/quando usar ferramentas).
+    * *Instrução para a IA*: "Ao configurar um Agente ADK, valide a coesão e clareza da `description` (para delegação), `instruction` (para o LLM do agente) e das docstrings das `tools` (para uso de ferramentas pelo LLM)."
+* **Configuração do Modelo LLM (`generate_content_config` em `google.genai.types`)**:
+    * `temperature`, `max_output_tokens`, `top_p`, `top_k`: Ajuste para controlar aleatoriedade, tamanho da resposta e coerência.
+    * `safety_settings`: **Configure categorias de dano (`HarmCategory`) e limites de bloqueio (`HarmBlockThreshold`) como primeira linha de defesa de IA Responsável.**
+* **Estrutura de Dados (`input_schema`, `output_schema` - Pydantic)**:
+    * Use para troca de dados JSON estruturados.
+    * `output_schema` impõe saída JSON, mas **desabilita o uso de ferramentas e a transferência para outro agente para esse LlmAgent específico**. Se usado, a `instruction` deve guiar o LLM a produzir JSON diretamente.
+* *Instrução para a IA*: "Lembre-me de configurar `safety_settings` no `generate_content_config`. Se `output_schema` for usado, avise sobre a desativação de ferramentas para esse agente e a necessidade de instruir o LLM a gerar JSON."
+
+### B. Ferramentas (Interface do Agente para Capacidades)
+* **Docstrings Abrangentes são a Interface Primária com o LLM**:
+    * O LLM depende **fortemente** da docstring para entender:
+        * Propósito da ferramenta.
+        * Quando usá-la.
+        * Definição de todos os argumentos (nome, tipo, propósito, se opcional, valores padrão).
+        * Descrição do valor de retorno (formato, conteúdo, tipo de dados, pares chave-valor se for um dicionário).
+        * **Um exemplo de uso dentro da docstring é altamente recomendado.**
+    * Docstrings devem ser claras, descritivas, precisas e escritas do ponto de vista do LLM.
+    * *Instrução para a IA*: "Para cada nova ferramenta Python no ADK, exija uma docstring completa, incluindo: propósito claro, descrição detalhada de cada argumento (nome, tipo, descrição), descrição do valor de retorno (tipo, estrutura, exemplo) e um exemplo prático de uso. Enfatize que esta docstring é a principal forma de comunicação com o LLM sobre a ferramenta."
+* **Definição de Funções de Ferramenta**:
+    * Funções Python regulares com type hints claros.
+    * Retornar dados em formatos estruturados (ex: dicionários, objetos Pydantic) que o agente possa analisar.
+    * **Tratamento de Erros Robusto**: Use `try...except` dentro das ferramentas e retorne mensagens de erro informativas para o agente. O agente precisa saber se uma ferramenta falhou.
+    * **Teste Localmente**: Confirme o funcionamento correto antes da integração.
+    * **Poka-yoke (À Prova de Erros)**: Projete argumentos de ferramenta para dificultar que o LLM cometa erros (ex: tipos específicos, enumerações, caminhos absolutos).
+* *Instrução para a IA*: "Garanta que todas as funções de ferramenta incluam tratamento de erros (`try-except`) e retornem informações claras sobre o sucesso ou falha da execução. Verifique se os parâmetros têm tipos definidos e se os retornos são estruturados."
+
+### C. Gerenciando Estado e Memória
+* **`session.state` (Dicionário Mutável)**:
+    * Memória de trabalho de curto prazo do agente dentro de uma `Session`.
+    * Usado para armazenar dados temporários, passar informações entre chamadas de ferramenta, entre turnos de um agente, ou entre agentes em `SequentialAgent` (via `InvocationContext` compartilhado).
+    * **Atua como um "quadro negro compartilhado" ou "barramento de mensagens".**
+    * Projete chaves de estado e estruturas de dados com clareza para evitar conflitos.
+* **`ToolContext`**:
+    * Passe para ferramentas como último argumento (`tool_context: ToolContext`) para permitir acesso e modificação seguros do `session.state` (`tool_context.state["chave"] = "valor"`).
+* **`output_key` (Parâmetro do Agente)**: Salva a resposta textual final do agente em `session.state["SUA_CHAVE"]`.
+* **Sessões**: No desenvolvimento local (`AdkApp`), são em memória. Na nuvem (Vertex AI Agent Engine), são persistentes e gerenciadas.
+* *Instrução para a IA*: "Ao passar dados entre ferramentas ou turnos, sugira o uso de `session.state` acessado via `ToolContext` nas ferramentas. Para resultados finais de um agente a serem usados por outro em sequência, lembre-me de definir o `output_key`."
+
+## III. Construindo Sistemas Multiagente Avançados
+
+### A. Orquestrando Arquiteturas Multiagente
+* **Composição de `BaseAgent`**: Use múltiplas instâncias para modularidade e especialização.
+* **Agentes de Fluxo de Trabalho (`WorkflowAgent`) para Controle Determinístico**:
+    * `SequentialAgent`: Executa subagentes sequencialmente, passando o mesmo `InvocationContext` (compartilhando estado).
+    * `ParallelAgent`: Executa subagentes concorrentemente. Podem acessar `session.state` compartilhado (usar chaves distintas).
+    * `LoopAgent`: Executa subagentes em loop (`max_iterations` ou até um agente escalar).
+* **Combine Tipos de Agente**:
+    * `LlmAgent`: Para raciocínio, geração e uso dinâmico de ferramentas (não determinístico).
+    * `WorkflowAgent`: Para controle de fluxo determinístico de outros agentes (sem LLM para lógica de fluxo).
+    * `CustomAgent`: Para lógica operacional única ou integrações especializadas.
+    * **Estratégia Chave**: Use `WorkflowAgents` para a estrutura de alto nível e `LlmAgents` para subtarefas flexíveis dentro dessa estrutura.
+* *Instrução para a IA*: "Para processos de múltiplas etapas, sugira o uso de `WorkflowAgents` (Sequential, Parallel, Loop) para orquestração determinística, contendo `LlmAgents` ou outros `WorkflowAgents` para as subtarefas. Explique a importância de combinar controle determinístico com flexibilidade de LLM."
+
+### B. Protocolos de Comunicação (A2A e MCP)
+* **A2A (Agent-to-Agent Protocol)**: Para comunicação e delegação direta e padronizada entre agentes (mesmo serviços separados). Agentes podem ter um A2A Server; um Orquestrador pode usar uma ferramenta `send_task`.
+* **MCP (Model Context Protocol)**: Padrão para agentes se conectarem e utilizarem ferramentas externas e fontes de dados de forma padronizada.
+* *Instrução para a IA*: "Para sistemas de agentes distribuídos ou que necessitem de interações padronizadas com ferramentas externas, sugira a investigação e possível implementação dos protocolos A2A e MCP."
+
+## IV. Ciclo de Vida do Desenvolvimento ADK
+
+### A. Teste e Depuração
+* **Desenvolvimento Iterativo**: Comece simples, adicione complexidade incrementalmente.
+* **Mocking de Ferramentas**: Use mocks para focar na lógica do agente.
+* **Teste Local com `adk api_server`**: Execute um servidor FastAPI local. Crie sessões e envie consultas via API/cURL.
+* **Inspecione Eventos do `Runner`**: Fornecem insights detalhados do fluxo (chamadas de ferramenta, pensamentos do LLM).
+* **Logging e Observabilidade**: Use `logging` e Callbacks. Considere ferramentas como Comet Opik.
+* *Instrução para a IA*: "Enfatize o desenvolvimento iterativo. Lembre-me de usar `adk api_server` para testes locais e de inspecionar eventos. Sugira pontos de logging e o uso de callbacks para observabilidade."
+
+### B. Estratégias de Versionamento
+* **Código**: Use Git.
+* **Dependências**: **Fixe TODAS as versões** em `requirements.txt` (ex: `google-cloud-aiplatform[agent_engines,adk]==X.Y.Z`). Minimize dependências.
+* **Artefatos de Dados (`ArtifactService`)**: Para dados binários versionados (ex: `GcsArtifactService` para produção, `InMemoryArtifactService` para dev/test). `save_artifact` versiona automaticamente; `load_artifact(..., version=N)` recupera específico.
+* **Agentes Implantados no Agent Engine**:
+    * Use `gcs_dir_name` diferentes para artefatos de preparação de diferentes versões para evitar sobrescritas.
+    * Use variáveis de ambiente (`env_vars`) para ID de versão em tempo de execução.
+    * Adote Versionamento Semântico (Major.Minor.Patch).
+* *Instrução para a IA*: "Verifique se TODAS as dependências no `requirements.txt` estão com versões fixadas. Ao preparar para implantação, lembre-me de usar um `gcs_dir_name` único para a versão e de configurar `env_vars` para rastreamento de versão."
+
+### C. Implantação no Vertex AI Agent Engine
+* **Wrapper `AdkApp`**: Envolva seu agente com `AdkApp` de `vertexai.preview.reasoning_engines`.
+* **Configurações Chave para `aiplatform.agent_engines.create`**:
+    * `requirements`: Caminho para `requirements.txt` (versões fixadas!).
+    * `extra_packages`: Código Python local (módulos customizados).
+    * `gcs_dir_name`: Diretório no GCS específico por versão/ambiente para artefatos de preparação.
+    * `env_vars`: Dicionário para variáveis de ambiente (use para configuração, chaves de API via Secret Manager). Evite nomes reservados.
+    * Metadados: `display_name`, `description` para o recurso ReasoningEngine.
+* *Instrução para a IA*: "Ao implantar no Vertex AI Agent Engine, guie-me na configuração de `aiplatform.agent_engines.create`, assegurando que `requirements` estejam fixados, `gcs_dir_name` seja único, e `env_vars` sejam usados para configuração segura (ex: via Secret Manager)."
+
+## V. Excelência Operacional
+
+### A. Otimizando o Desempenho
+* **Ferramentas Eficientes**: Otimize o código da ferramenta. Considere operações assíncronas para I/O.
+* **Seleção de Modelo e Configuração LLM**: Equilibre precisão, velocidade e custo. Ajuste `max_output_tokens`, `temperature`.
+* **Gerenciamento de Contexto (`include_contents` no `Agent`)**: Controle o envio do histórico da conversa para o LLM ('none' para sem estado, 'default' para com estado).
+* *Instrução para a IA*: "Ajude-me a analisar o desempenho do agente, sugerindo otimizações no código das ferramentas, na escolha do modelo LLM, na configuração de `generate_content_config`, e no uso de `include_contents`."
+
+### B. Segurança e IA Responsável no ADK
+* **Configurações de Segurança no Nível do Modelo LLM**: Configure `HarmCategory` e `HarmBlockThreshold` no `generate_content_config` como linha de base.
+* **Callbacks para Guardrails Customizados**: Use `before_model_callback` e `before_tool_callback` para inspecionar, modificar, validar ou bloquear entradas/argumentos inseguros ou inadequados. Implemente lógica de segurança específica da aplicação aqui.
+* **Manuseio Seguro de Credenciais/Chaves API**: **NÃO CODIFIQUE NO CÓDIGO.** Use variáveis de ambiente (`env_vars`) referenciando segredos do Google Secret Manager ao implantar no Agent Engine.
+* **Validação de Entrada e Sanitização de Saída**: Valide todas as entradas do usuário e sanitize as saídas do agente.
+* **Permissões Mínimas (IAM)**: Configure permissões apropriadas para o agente implantado.
+* *Instrução para a IA*: "Priorize a segurança: lembre-me de configurar `safety_settings` do LLM. Sugira a implementação de guardrails customizados usando `before_model_callback` e `before_tool_callback`. Recomende o uso do Secret Manager para credenciais via `env_vars` e a validação de todas as entradas do usuário."
+
+### C. Projetando para Manutenibilidade e Escalabilidade
+* **Legibilidade e Convenções**: Use constantes para nomes de modelos, etc. Nomes claros para agentes, ferramentas, e **chaves de `session.state`**.
+* **Tratamento Robusto de Erros**: Em ferramentas, callbacks, e ao usar `ArtifactService`.
+* **Design Modular**: Reitere a importância de subagentes e `WorkflowAgents`.
+
+* *Instrução para a IA*: "Promova a escrita de código ADK legível, com convenções de nomenclatura claras (especialmente para chaves de `session.state`). Ajude a implementar tratamento de erros abrangente e a manter um design modular."
