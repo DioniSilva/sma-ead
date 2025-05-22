@@ -1,3 +1,0 @@
-"""
-Pacote de agentes customizados.
-""" 

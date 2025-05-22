@@ -1,3 +1,0 @@
-"""
-Pacote de configurações do sistema.
-""" 
