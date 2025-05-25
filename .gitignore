@@ -71,6 +71,7 @@ temp/
 *.pyd
 .Python
 *.so
+*.lock
 
 # Arquivos de Documentação
 docs/_build/
