@@ -3,11 +3,13 @@ import os
 from google.adk.agents import Agent
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
 from vertexai.preview import rag
+from opik.integrations.adk import OpikTracer
 
 from dotenv import load_dotenv
 from .prompts import return_instructions_root
 
 load_dotenv()
+opik_tracer = OpikTracer()
 
 ask_vertex_retrieval = VertexAiRagRetrieval(
     name='retrieve_rag_documentation',
@@ -32,5 +34,11 @@ root_agent = Agent(
     instruction=return_instructions_root(),
     tools=[
         ask_vertex_retrieval,
-    ]
+    ],
+    before_agent_callback=opik_tracer.before_agent_callback,
+    after_agent_callback=opik_tracer.after_agent_callback,
+    before_model_callback=opik_tracer.before_model_callback,
+    after_model_callback=opik_tracer.after_model_callback,
+    before_tool_callback=opik_tracer.before_tool_callback,
+    after_tool_callback=opik_tracer.after_tool_callback,
 )
